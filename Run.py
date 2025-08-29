@@ -1,0 +1,225 @@
+import streamlit as st
+from PIL import Image, ImageDraw, ImageFont
+import os, re, requests
+from rembg import remove
+from io import BytesIO
+from bs4 import BeautifulSoup
+
+# -------------------- SETTINGS --------------------
+script_dir = os.path.dirname(os.path.realpath(__file__))
+image_path = os.path.join(script_dir, "Base2.JPEG")
+font_path = os.path.join(script_dir, "Arial.ttf")
+overlay_box = (0, 0, 828, 1088)
+
+blocks_config = {
+    "Block 1": {"x": 20, "y": 1240, "height": 40, "color": "#dbdfde", "underline": False},
+    "Item Size": {"x": 20, "y": 1290, "height": 38, "color": "#99a2a1", "underline": False},
+    "Item Price": {"x": 20, "y": 1365, "height": 33, "color": "#99a2a1", "underline": False},
+    "Buyer Fee": {"x": 20, "y": 1408, "height": 38, "color": "#648a93", "underline": False},
+}
+
+# ------------------- VINTED SCRAPER -------------------
+def fetch_vinted(url):
+    headers = {"User-Agent":"Mozilla/5.0"}
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # --- Title ---
+    title_tag = soup.select_one("h1.web_ui__Text__title")
+    title = title_tag.get_text(strip=True) if title_tag else ""
+
+    # --- Price ---
+    price_tag = soup.select_one("p.web_ui__Text__subtitle")
+    price_text = price_tag.get_text(strip=True) if price_tag else ""
+    price_val = float(re.sub(r"[^0-9.]", "", price_text) or 0)
+    buyer_fee = round(price_val * 1.06, 2)
+
+    # --- Image ---
+    image = None
+    for img in soup.find_all("img"):
+        src = img.get("src")
+        if src and src.startswith("https://images1.vinted.net/"):
+            image = src
+            break
+
+    # --- Size ---
+    size = ""
+    size_span = soup.select_one('span.web_ui__Text__subtitle button')
+    if size_span and size_span.parent:
+        size = size_span.parent.contents[0].strip()
+
+    # --- Condition ---
+    valid_conditions = ["New with tags","New without tags","Very good","Good","Satisfactory"]
+    condition = ""
+    for span in soup.select('span.web_ui__Text__bold'):
+        text = span.contents[0].strip() if span.contents else ""
+        if text in valid_conditions:
+            condition = text
+            break
+
+    # --- Brand ---
+    brand_tag = soup.select_one('span[itemprop="name"]')
+    brand = brand_tag.get_text(strip=True) if brand_tag else ""
+
+    return {
+        "title": title,
+        "price": f"£{price_val:.2f}",
+        "buyer_fee": f"£{buyer_fee:.2f}",
+        "image": image,
+        "size": size,
+        "condition": condition,
+        "brand": brand
+    }
+
+# ------------------- HELPERS -------------------
+def resize_and_crop(img, w, h):
+    ratio, target = img.width/img.height, w/h
+    if ratio > target:
+        scale_h, scale_w = h, int(h*ratio)
+    else:
+        scale_w, scale_h = w, int(h/ratio)
+    img = img.resize((scale_w, scale_h), Image.Resampling.LANCZOS)
+    left, top = (img.width-w)//2, (img.height-h)//2
+    return img.crop((left, top, left+w, top+h))
+
+def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=False):
+    if not text: return
+    font_size = 10
+    font = ImageFont.truetype(font_path, font_size)
+    while font.getmetrics()[0]+font.getmetrics()[1] < h:
+        font_size += 1
+        font = ImageFont.truetype(font_path, font_size)
+    y_offset = y-(font.getmetrics()[0]+font.getmetrics()[1])//2
+
+    if is_currency and text.startswith("£"):
+        number_text = text[1:]
+        draw.text((x, y_offset), "£", fill=color, font=font)
+        draw.text((x + draw.textlength("£", font=font), y_offset), number_text, fill=color, font=font)
+    else:
+        draw.text((x, y_offset), text, fill=color, font=font)
+
+    if underline:
+        bbox = draw.textbbox((x, y_offset), text, font=font)
+        y_line = bbox[3]
+        draw.line((bbox[0], y_line, bbox[2], y_line), fill=color, width=2)
+
+def draw_item_size_block(draw, size, condition, brand, x, y, h):
+    spacing = 6
+    cur_x = x
+    font_size = 10
+    font = ImageFont.truetype(font_path, font_size)
+    while font.getmetrics()[0]+font.getmetrics()[1] < h:
+        font_size += 1
+        font = ImageFont.truetype(font_path, font_size)
+    y_offset = y-(font.getmetrics()[0]+font.getmetrics()[1])//2
+
+    if size:
+        draw.text((cur_x, y_offset), size, fill="#99a2a1", font=font)
+        cur_x += draw.textlength(size, font=font) + spacing
+
+    draw.text((cur_x, y_offset), "·", fill="#99a2a1", font=font)
+    cur_x += draw.textlength("·", font=font) + spacing
+
+    if condition:
+        draw.text((cur_x, y_offset), condition, fill="#99a2a1", font=font)
+        cur_x += draw.textlength(condition, font=font) + spacing
+
+    draw.text((cur_x, y_offset), "·", fill="#99a2a1", font=font)
+    cur_x += draw.textlength("·", font=font) + spacing
+
+    if brand:
+        draw.text((cur_x, y_offset), brand, fill="#648a93", font=font)
+        bbox = draw.textbbox((cur_x, y_offset), brand, font=font)
+        y_line = bbox[3]
+        draw.line((bbox[0], y_line, bbox[2], y_line), fill="#648a93", width=2)
+
+# ------------------- SESSION STATE -------------------
+if "product_info" not in st.session_state:
+    st.session_state.product_info = None
+if "product_img" not in st.session_state:
+    st.session_state.product_img = None
+
+# ------------------- APP -------------------
+st.title("Vinted Link Image Generator")
+bg_colors = {"White":"#ffffff","Blue":"#3399ff","Green":"#33cc33","Purple":"#9933ff","Red":"#ff3333","Rose":"#ff66cc"}
+color_name = st.selectbox("Select Background Color", list(bg_colors.keys()), index=0)
+bg_color = bg_colors[color_name]
+
+url = st.text_input("Paste Vinted URL")
+
+# --- Optional image upload without background removal ---
+uploaded_file = st.file_uploader(
+    "Optional: Use Your Own Image (Not Neccessary!)", 
+    type=["png","jpg","jpeg"]
+)
+if uploaded_file:
+    st.session_state.product_img = Image.open(uploaded_file).convert("RGBA")
+
+if url and st.session_state.product_img is None:
+    if st.session_state.product_info is None or st.session_state.product_info.get("url") != url:
+        with st.spinner("Fetching product data..."):
+            info = fetch_vinted(url)
+            product_img = None
+            if info["image"]:
+                img_data = requests.get(info["image"]).content
+                product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
+            info["url"] = url
+            st.session_state.product_info = info
+            st.session_state.product_img = product_img
+
+if st.button("Generate Image") and st.session_state.product_img:
+    info = st.session_state.product_info
+    product_img = st.session_state.product_img
+
+    all_texts = {
+        "Block 1": info.get("title",""),
+        "Item Price": info.get("price",""),
+        "Buyer Fee": info.get("buyer_fee","")
+    }
+
+    base_img = Image.open(image_path).convert("RGBA")
+    overlay_left,ot,overlay_right,ob = overlay_box
+    ow,oh = overlay_right-overlay_left, ob-ot
+
+    bg_rect = Image.new("RGBA",(ow,oh),bg_color)
+    background = Image.new("RGBA", base_img.size, (0,0,0,0))
+    background.paste(bg_rect,(overlay_left,ot))
+    img = Image.alpha_composite(base_img, background)
+
+    if product_img:
+        overlay = resize_and_crop(product_img, ow, oh)
+        img.paste(overlay, (overlay_left, ot), overlay)
+
+    draw = ImageDraw.Draw(img)
+
+    draw_item_size_block(
+        draw,
+        info.get("size",""),
+        info.get("condition",""),
+        info.get("brand",""),
+        blocks_config["Item Size"]["x"],
+        blocks_config["Item Size"]["y"],
+        blocks_config["Item Size"]["height"]
+    )
+
+    for block, text in all_texts.items():
+        cfg = blocks_config[block]
+        draw_text_block(draw, text, cfg["x"], cfg["y"], cfg["height"], cfg["color"], cfg["underline"],
+                        is_currency=True)
+
+    fw, fh = img.width, int(img.width*16/9)
+    if fh>img.height: fh=img.height; fw=int(fh*9/16)
+    left, top = (img.width-fw)//2, (img.height-fh)//2
+    img_cropped = img.crop((left, top, left+fw, top+fh))
+
+    st.image(img_cropped)
+    output_path = os.path.join(script_dir,"output.jpeg")
+
+    img_cropped.convert("RGB").save(output_path)
+    
+    # --- Download button with "Hold Image Above To Save Instead of Download" text ---
+    col1, col2 = st.columns([1,3])
+    with col1:
+        st.download_button("Download Image", open(output_path,"rb"), "output.jpeg", mime="image/jpeg")
+    with col2:
+        st.markdown("**Hold Image Above To Save Instead of Download**")
