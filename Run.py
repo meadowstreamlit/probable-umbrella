@@ -1,6 +1,6 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
-import os, re, requests
+import os, re, requests, random, zipfile
 from rembg import remove
 from io import BytesIO
 from bs4 import BeautifulSoup
@@ -24,17 +24,14 @@ def fetch_vinted(url):
     r = requests.get(url, headers=headers)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # --- Title ---
     title_tag = soup.select_one("h1.web_ui__Text__title")
     title = title_tag.get_text(strip=True) if title_tag else ""
 
-    # --- Price ---
     price_tag = soup.select_one("p.web_ui__Text__subtitle")
     price_text = price_tag.get_text(strip=True) if price_tag else ""
     price_val = float(re.sub(r"[^0-9.]", "", price_text) or 0)
     buyer_fee = round(price_val * 1.06, 2)
 
-    # --- Image ---
     image = None
     for img in soup.find_all("img"):
         src = img.get("src")
@@ -42,13 +39,11 @@ def fetch_vinted(url):
             image = src
             break
 
-    # --- Size ---
     size = ""
     size_span = soup.select_one('span.web_ui__Text__subtitle button')
     if size_span and size_span.parent:
         size = size_span.parent.contents[0].strip()
 
-    # --- Condition ---
     valid_conditions = ["New with tags","New without tags","Very good","Good","Satisfactory"]
     condition = ""
     for span in soup.select('span.web_ui__Text__bold'):
@@ -57,7 +52,6 @@ def fetch_vinted(url):
             condition = text
             break
 
-    # --- Brand ---
     brand_tag = soup.select_one('span[itemprop="name"]')
     brand = brand_tag.get_text(strip=True) if brand_tag else ""
 
@@ -134,43 +128,11 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h):
         draw.line((bbox[0], y_line, bbox[2], y_line), fill="#648a93", width=2)
 
 # ------------------- SESSION STATE -------------------
-if "product_info" not in st.session_state:
-    st.session_state.product_info = None
-if "product_img" not in st.session_state:
-    st.session_state.product_img = None
+if "cache" not in st.session_state:
+    st.session_state.cache = {}
 
-# ------------------- APP -------------------
-st.title("Vinted Link Image Generator")
-bg_colors = {"White":"#ffffff","Blue":"#3399ff","Green":"#33cc33","Purple":"#9933ff","Red":"#ff3333","Rose":"#ff66cc"}
-color_name = st.selectbox("Select Background Color", list(bg_colors.keys()), index=0)
-bg_color = bg_colors[color_name]
-
-url = st.text_input("Paste Vinted URL")
-
-# --- Optional image upload without background removal ---
-uploaded_file = st.file_uploader(
-    "Optional: Use Your Own Image (Not Neccessary!)", 
-    type=["png","jpg","jpeg"]
-)
-if uploaded_file:
-    st.session_state.product_img = Image.open(uploaded_file).convert("RGBA")
-
-if url and st.session_state.product_img is None:
-    if st.session_state.product_info is None or st.session_state.product_info.get("url") != url:
-        with st.spinner("Fetching product data..."):
-            info = fetch_vinted(url)
-            product_img = None
-            if info["image"]:
-                img_data = requests.get(info["image"]).content
-                product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
-            info["url"] = url
-            st.session_state.product_info = info
-            st.session_state.product_img = product_img
-
-if st.button("Generate Image") and st.session_state.product_img:
-    info = st.session_state.product_info
-    product_img = st.session_state.product_img
-
+# ------------------- GENERATE IMAGE FUNCTION -------------------
+def generate_image(info, product_img, bg_color):
     all_texts = {
         "Block 1": info.get("title",""),
         "Item Price": info.get("price",""),
@@ -211,15 +173,74 @@ if st.button("Generate Image") and st.session_state.product_img:
     if fh>img.height: fh=img.height; fw=int(fh*9/16)
     left, top = (img.width-fw)//2, (img.height-fh)//2
     img_cropped = img.crop((left, top, left+fw, top+fh))
+    return img_cropped
 
-    st.image(img_cropped)
-    output_path = os.path.join(script_dir,"output.jpeg")
+# ------------------- APP -------------------
+st.title("Vinted Link Image Generator")
 
-    img_cropped.convert("RGB").save(output_path)
-    
-    # --- Download button with "Hold Image Above To Save Instead of Download" text ---
-    col1, col2 = st.columns([1,3])
-    with col1:
-        st.download_button("Download Image", open(output_path,"rb"), "output.jpeg", mime="image/jpeg")
-    with col2:
-        st.markdown("**Hold Image Above To Save Instead of Download**")
+bg_colors = {"White":"#ffffff","Blue":"#3399ff","Green":"#33cc33","Purple":"#9933ff","Red":"#ff3333","Rose":"#ff66cc"}
+
+mode = st.radio("Choose Mode", ["Single URL","Bulk URLs"])
+
+if mode == "Single URL":
+    color_name = st.selectbox("Select Background Color", list(bg_colors.keys()), index=0)
+    bg_color = bg_colors[color_name]
+    url = st.text_input("Paste Vinted URL")
+
+    uploaded_file = st.file_uploader("Optional: Use Your Own Image", type=["png","jpg","jpeg"])
+    if uploaded_file:
+        st.session_state.cache[url] = {
+            "info": None,
+            "img": Image.open(uploaded_file).convert("RGBA")
+        }
+
+    # Early fetch silently in background
+    if url and url not in st.session_state.cache:
+        info = fetch_vinted(url)
+        product_img = None
+        if info["image"]:
+            img_data = requests.get(info["image"]).content
+            product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
+        st.session_state.cache[url] = {"info": info, "img": product_img}
+
+    if st.button("Generate Image") and url in st.session_state.cache:
+        data = st.session_state.cache[url]
+        info, product_img = data["info"], data["img"]
+        img_cropped = generate_image(info, product_img, bg_color)
+        st.image(img_cropped)
+        output_path = os.path.join(script_dir,"output.jpeg")
+        img_cropped.convert("RGB").save(output_path)
+
+        col1, col2 = st.columns([1,3])
+        with col1:
+            st.download_button("Download Image", open(output_path,"rb"), "output.jpeg", mime="image/jpeg")
+        with col2:
+            st.markdown("**Hold Image Above To Save Instead of Download**")
+
+elif mode == "Bulk URLs":
+    urls_text = st.text_area("Paste multiple Vinted URLs (comma or newline separated)")
+    urls = [u.strip() for u in re.split(r"[\n,]", urls_text) if u.strip()]
+
+    if st.button("Generate Bulk Images") and urls:
+        zip_path = os.path.join(script_dir, "bulk_output.zip")
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            for i, url in enumerate(urls, 1):
+                if url not in st.session_state.cache:
+                    info = fetch_vinted(url)
+                    product_img = None
+                    if info["image"]:
+                        img_data = requests.get(info["image"]).content
+                        product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
+                    st.session_state.cache[url] = {"info": info, "img": product_img}
+
+                data = st.session_state.cache[url]
+                info, product_img = data["info"], data["img"]
+                bg_color = random.choice(list(bg_colors.values()))
+                img_cropped = generate_image(info, product_img, bg_color)
+
+                out_path = f"bulk_image_{i}.jpeg"
+                img_cropped.convert("RGB").save(out_path)
+                zipf.write(out_path)
+                st.image(img_cropped, caption=f"Image {i}")
+
+        st.download_button("Download All as ZIP", open(zip_path,"rb"), "bulk_output.zip", mime="application/zip")
