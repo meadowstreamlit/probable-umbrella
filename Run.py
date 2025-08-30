@@ -40,12 +40,11 @@ def fetch_vinted(url):
             image = src
             break
 
-    # ----------------- FIXED SIZE PARSING -----------------
+    # ----------------- Robust Size Parsing via "Size information" button -----------------
     size = ""
-    size_span = soup.select_one('span.web_ui__Text__subtitle button')
-    if size_span and size_span.parent:
-        # Take only the direct text of the span, ignore the button
-        candidate = size_span.parent.find(text=True, recursive=False)
+    size_button = soup.select_one('button[aria-label="Size information"], button[title="Size information"]')
+    if size_button and size_button.parent:
+        candidate = size_button.parent.find(text=True, recursive=False)
         if candidate:
             size = candidate.strip()
 
