@@ -4,7 +4,6 @@ import os, re, requests, random, zipfile
 from rembg import remove
 from io import BytesIO
 from bs4 import BeautifulSoup
-import string
 
 # -------------------- SETTINGS --------------------
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -19,27 +18,6 @@ blocks_config = {
     "Buyer Fee": {"x": 20, "y": 1408, "height": 38, "color": "#648a93", "underline": False},
 }
 
-# ------------------- UTILS -------------------
-def remove_emojis(text):
-    # Remove any emoji from text
-    return text.encode('ascii', 'ignore').decode('ascii')
-
-def upscale_image(img, scale=2):
-    w, h = img.size
-    return img.resize((w*scale, h*scale), Image.Resampling.LANCZOS)
-
-def pad_image(img, padding=50):
-    w, h = img.size
-    new_img = Image.new("RGBA", (w + 2*padding, h + 2*padding), (0,0,0,0))
-    new_img.paste(img, (padding, padding))
-    return new_img
-
-def prepare_image_for_removal(img, scale=2, padding=50):
-    padded = pad_image(img, padding)
-    upscaled = upscale_image(padded, scale)
-    bg_removed = remove(upscaled)
-    return bg_removed
-
 # ------------------- VINTED SCRAPER -------------------
 def fetch_vinted(url):
     headers = {"User-Agent":"Mozilla/5.0"}
@@ -48,7 +26,6 @@ def fetch_vinted(url):
 
     title_tag = soup.select_one("h1.web_ui__Text__title")
     title = title_tag.get_text(strip=True) if title_tag else ""
-    title = remove_emojis(title)
 
     price_tag = soup.select_one("p.web_ui__Text__subtitle")
     price_text = price_tag.get_text(strip=True) if price_tag else ""
@@ -88,7 +65,7 @@ def fetch_vinted(url):
         "brand": brand
     }
 
-# ------------------- TEXT & DRAW -------------------
+# ------------------- HELPERS -------------------
 def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=False):
     if not text: return
     font_size = 10
@@ -162,7 +139,7 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h):
 if "cache" not in st.session_state:
     st.session_state.cache = {}
 
-# ------------------- IMAGE GENERATION -------------------
+# ------------------- GENERATE IMAGE FUNCTION -------------------
 def generate_image(info, product_img, bg_color):
     all_texts = {
         "Block 1": info.get("title",""),
@@ -180,8 +157,9 @@ def generate_image(info, product_img, bg_color):
     background.paste(bg_rect,(overlay_left,ot))
     img = Image.alpha_composite(base_img, background)
 
-    # Scale AFTER background removal
+    # Resize AFTER background removal
     if product_img:
+        # Scale to 800px width based on background removed image
         target_width = 800
         img_w, img_h = product_img.size
         scale = target_width / img_w
@@ -236,8 +214,7 @@ if mode == "Single URL":
     uploaded_file = st.file_uploader("Optional: Use Your Own Image", type=["png","jpg","jpeg"])
     if uploaded_file:
         with st.spinner("Removing background and preparing image..."):
-            img_loaded = Image.open(uploaded_file).convert("RGBA")
-            bg_removed = prepare_image_for_removal(img_loaded, scale=2, padding=50)
+            bg_removed = remove(Image.open(uploaded_file).convert("RGBA"))
             st.session_state.cache[url] = {"info": None, "img": bg_removed}
 
     if url and url not in st.session_state.cache:
@@ -246,8 +223,7 @@ if mode == "Single URL":
             product_img = None
             if info["image"]:
                 img_data = requests.get(info["image"]).content
-                img_loaded = Image.open(BytesIO(img_data)).convert("RGBA")
-                product_img = prepare_image_for_removal(img_loaded, scale=2, padding=50)
+                product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
             st.session_state.cache[url] = {"info": info, "img": product_img}
 
     if st.button("Generate Image") and url in st.session_state.cache:
@@ -279,8 +255,7 @@ elif mode == "Bulk URLs":
                         product_img = None
                         if info["image"]:
                             img_data = requests.get(info["image"]).content
-                            img_loaded = Image.open(BytesIO(img_data)).convert("RGBA")
-                            product_img = prepare_image_for_removal(img_loaded, scale=2, padding=50)
+                            product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
                         st.session_state.cache[url] = {"info": info, "img": product_img}
 
                     data = st.session_state.cache[url]
