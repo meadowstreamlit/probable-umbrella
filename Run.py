@@ -40,15 +40,19 @@ def fetch_vinted(url):
             image = src
             break
 
+    # ----------------- FIXED SIZE PARSING -----------------
     size = ""
     size_span = soup.select_one('span.web_ui__Text__subtitle button')
     if size_span and size_span.parent:
-        size = size_span.parent.contents[0].strip()
+        # Take only the direct text of the span, ignore the button
+        candidate = size_span.parent.find(text=True, recursive=False)
+        if candidate:
+            size = candidate.strip()
 
     valid_conditions = ["New with tags","New without tags","Very good","Good","Satisfactory"]
     condition = ""
     for span in soup.select('span.web_ui__Text__bold'):
-        text = span.contents[0].strip() if span.contents else ""
+        text = span.get_text(strip=True) if span else ""
         if text in valid_conditions:
             condition = text
             break
@@ -75,7 +79,6 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
         font_size += 1
         font = ImageFont.truetype(font_path, font_size)
 
-    # Split title into lines if necessary (50 chars, word boundary)
     lines = []
     if len(text) <= 50:
         lines = [text]
@@ -86,11 +89,10 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
         else:
             lines = [text[:last_space], text[last_space+1:]]
 
-    # Adjust font smaller and move down if 2 lines
     if len(lines) > 1:
         font_size -= 3
         font = ImageFont.truetype(font_path, font_size)
-        y += 10  # move down slightly
+        y += 10
 
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h
@@ -116,7 +118,6 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h, mode_theme):
         font = ImageFont.truetype(font_path, font_size)
     y_offset = y-(font.getmetrics()[0]+font.getmetrics()[1])//2
 
-    # Set colors based on theme
     if mode_theme == "Light Mode":
         text_color = "#606b6c"
         brand_color = "#648a93"
@@ -160,25 +161,20 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
     overlay_left,ot,overlay_right,ob = overlay_box
     ow,oh = overlay_right-overlay_left, ob-ot
 
-    # Background rectangle
     bg_rect = Image.new("RGBA",(ow,oh),bg_color)
     background = Image.new("RGBA", base_img.size, (0,0,0,0))
 
-    # Apply light mode offset
     img_offset = 0
     text_offset = 0
     if mode_theme == "Light Mode":
         img_offset = 16
         text_offset = 10
-        # Fill band at top so there's no gap
         fill_band = Image.new("RGBA", (ow, img_offset), bg_color)
         background.paste(fill_band, (overlay_left, ot))
 
-    # Paste background block
     background.paste(bg_rect, (overlay_left, ot+img_offset))
     img = Image.alpha_composite(base_img, background)
 
-    # Resize AFTER background removal
     if product_img:
         target_width = 800
         img_w, img_h = product_img.size
@@ -203,7 +199,6 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
         mode_theme
     )
 
-    # Adjust title/price/buyer fee
     for block, text in all_texts.items():
         cfg = blocks_config[block]
         if block == "Block 1" and mode_theme == "Light Mode":
@@ -232,7 +227,6 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-# ---------------- Theme and Colors ----------------
 mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)  # default = Dark
 
 bg_colors = {
