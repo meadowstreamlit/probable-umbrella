@@ -85,6 +85,12 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
         else:
             lines = [text[:last_space], text[last_space+1:]]
 
+    # Adjust font slightly smaller and move down if 2 lines
+    if len(lines) > 1:
+        font_size -= 1  # slightly smaller
+        font = ImageFont.truetype(font_path, font_size)
+        y += 5  # move down a bit
+
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h
         if is_currency and line.startswith("£"):
@@ -151,12 +157,15 @@ def generate_image(info, product_img, bg_color):
     background.paste(bg_rect,(overlay_left,ot))
     img = Image.alpha_composite(base_img, background)
 
-    # Paste product image at original size, centered
+    # Paste product image at 2x original size, centered
     if product_img:
         img_w, img_h = product_img.size
+        img_w *= 2
+        img_h *= 2
+        product_img_resized = product_img.resize((img_w, img_h), Image.Resampling.LANCZOS)
         paste_x = overlay_left + (ow - img_w)//2
         paste_y = ot + (oh - img_h)//2
-        img.paste(product_img, (paste_x, paste_y), product_img)
+        img.paste(product_img_resized, (paste_x, paste_y), product_img_resized)
 
     draw = ImageDraw.Draw(img)
 
