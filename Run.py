@@ -19,57 +19,10 @@ blocks_config = {
     "Buyer Fee": {"x": 20, "y": 1408, "height": 38, "color": "#648a93", "underline": False},
 }
 
-# ------------------- VINTED SCRAPER -------------------
-def fetch_vinted(url):
-    headers = {"User-Agent":"Mozilla/5.0"}
-    r = requests.get(url, headers=headers)
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    title_tag = soup.select_one("h1.web_ui__Text__title")
-    title = title_tag.get_text(strip=True) if title_tag else ""
-
-    price_tag = soup.select_one("p.web_ui__Text__subtitle")
-    price_text = price_tag.get_text(strip=True) if price_tag else ""
-    price_val = float(re.sub(r"[^0-9.]", "", price_text) or 0)
-    buyer_fee = round(price_val * 1.06, 2)
-
-    image = None
-    for img in soup.find_all("img"):
-        src = img.get("src")
-        if src and src.startswith("https://images1.vinted.net/"):
-            image = src
-            break
-
-    # Robust size parsing using "Size information" button
-    size = ""
-    size_button = soup.select_one('button[aria-label="Size information"], button[title="Size information"]')
-    if size_button and size_button.parent:
-        candidate = size_button.parent.find(text=True, recursive=False)
-        if candidate:
-            size = candidate.strip()
-
-    valid_conditions = ["New with tags","New without tags","Very good","Good","Satisfactory"]
-    condition = ""
-    for span in soup.select('span.web_ui__Text__bold'):
-        text = span.get_text(strip=True) if span else ""
-        if text in valid_conditions:
-            condition = text
-            break
-
-    brand_tag = soup.select_one('span[itemprop="name"]')
-    brand = brand_tag.get_text(strip=True) if brand_tag else ""
-
-    return {
-        "title": title,
-        "price": f"£{price_val:.2f}",
-        "buyer_fee": f"£{buyer_fee:.2f}",
-        "image": image,
-        "size": size,
-        "condition": condition,
-        "brand": brand
-    }
-
 # ------------------- HELPERS -------------------
+def remove_emojis(text):
+    return re.sub(r"[^\w\s\-/&]", "", text)
+
 def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=False):
     if not text: return 0
     font_size = 10
@@ -149,6 +102,62 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h, mode_theme):
         y_line = bbox[3]
         draw.line((bbox[0], y_line, bbox[2], y_line), fill=brand_color, width=2)
 
+# ------------------- VINTED SCRAPER -------------------
+def fetch_vinted(url):
+    headers = {"User-Agent":"Mozilla/5.0"}
+    r = requests.get(url, headers=headers)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Title without emojis
+    title_tag = soup.select_one("h1.web_ui__Text__title")
+    title = title_tag.get_text(strip=True) if title_tag else ""
+    title = remove_emojis(title)
+
+    # Price
+    price_tag = soup.select_one("p.web_ui__Text__subtitle")
+    price_text = price_tag.get_text(strip=True) if price_tag else ""
+    price_val = float(re.sub(r"[^0-9.]", "", price_text) or 0)
+    buyer_fee = round(price_val * 1.06, 2)
+
+    # Product image
+    image = None
+    for img in soup.find_all("img"):
+        src = img.get("src")
+        if src and src.startswith("https://images1.vinted.net/"):
+            image = src
+            break
+
+    # Size via "Size information" button
+    size = ""
+    size_button = soup.select_one('button[aria-label="Size information"], button[title="Size information"]')
+    if size_button and size_button.parent:
+        candidate = size_button.parent.find(text=True, recursive=False)
+        if candidate:
+            size = candidate.strip()
+
+    # Condition
+    valid_conditions = ["New with tags","New without tags","Very good","Good","Satisfactory"]
+    condition = ""
+    for span in soup.select('span.web_ui__Text__bold'):
+        text = span.get_text(strip=True) if span else ""
+        if text in valid_conditions:
+            condition = text
+            break
+
+    # Brand via <a href="/brand/..."><span>Brand</span></a>
+    brand_tag = soup.select_one('a[href^="/brand/"] span')
+    brand = brand_tag.get_text(strip=True) if brand_tag else ""
+
+    return {
+        "title": title,
+        "price": f"£{price_val:.2f}",
+        "buyer_fee": f"£{buyer_fee:.2f}",
+        "image": image,
+        "size": size,
+        "condition": condition,
+        "brand": brand
+    }
+
 # ------------------- SESSION STATE -------------------
 if "cache" not in st.session_state:
     st.session_state.cache = {}
@@ -218,8 +227,6 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
         color = cfg["color"]
         if block == "Item Price" and mode_theme=="Light Mode":
             color = "#606b6c"
-        if block == "Block 1" and mode_theme=="Light Mode":
-            color = "#15191a"
         draw_text_block(draw, text, cfg["x"], cfg["y"] + text_offset, cfg["height"], color, cfg["underline"], is_currency=True)
 
     # Crop to 16:9
