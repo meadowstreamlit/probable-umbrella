@@ -87,9 +87,9 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
 
     # Adjust font smaller and move down if 2 lines
     if len(lines) > 1:
-        font_size -= 3  # smaller than previous
+        font_size -= 3  # smaller than single-line font
         font = ImageFont.truetype(font_path, font_size)
-        y += 10  # move down a bit more
+        y += 10  # move down slightly
 
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h
@@ -157,11 +157,11 @@ def generate_image(info, product_img, bg_color):
     background.paste(bg_rect,(overlay_left,ot))
     img = Image.alpha_composite(base_img, background)
 
-    # Paste product image: max 828x828 centered, aspect ratio preserved
+    # Paste product image: width always 800 px, height proportional
     if product_img:
-        max_size = 828
+        target_width = 800
         img_w, img_h = product_img.size
-        scale = min(max_size / img_w, max_size / img_h, 1)  # scale to fit 828x828
+        scale = target_width / img_w
         new_w = int(img_w * scale)
         new_h = int(img_h * scale)
         product_img_resized = product_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
