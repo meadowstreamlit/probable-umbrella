@@ -1,6 +1,6 @@
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
-import os, re, requests, random, zipfile, emoji
+import os, re, requests, random, zipfile
 from rembg import remove
 from io import BytesIO
 from bs4 import BeautifulSoup
@@ -10,7 +10,7 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 image_dark = os.path.join(script_dir, "Base2.JPEG")
 image_light = os.path.join(script_dir, "Base3.jpg")
 font_path = os.path.join(script_dir, "Arial.ttf")
-overlay_box = (0, 0, 828, 1088)
+overlay_box = (0, 0, 828, 1088)  # background overlay size
 
 blocks_config = {
     "Block 1": {"x": 20, "y": 1240, "height": 40, "color": "#dbdfde", "underline": False},
@@ -25,18 +25,14 @@ def fetch_vinted(url):
     r = requests.get(url, headers=headers)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # Title + remove emojis
     title_tag = soup.select_one("h1.web_ui__Text__title")
     title = title_tag.get_text(strip=True) if title_tag else ""
-    title = emoji.replace_emoji(title, replace='')
 
-    # Price & Buyer fee
     price_tag = soup.select_one("p.web_ui__Text__subtitle")
     price_text = price_tag.get_text(strip=True) if price_tag else ""
     price_val = float(re.sub(r"[^0-9.]", "", price_text) or 0)
     buyer_fee = round(price_val * 1.06, 2)
 
-    # Product image
     image = None
     for img in soup.find_all("img"):
         src = img.get("src")
@@ -44,7 +40,7 @@ def fetch_vinted(url):
             image = src
             break
 
-    # Robust size parsing
+    # Robust size parsing using "Size information" button
     size = ""
     size_button = soup.select_one('button[aria-label="Size information"], button[title="Size information"]')
     if size_button and size_button.parent:
@@ -52,7 +48,6 @@ def fetch_vinted(url):
         if candidate:
             size = candidate.strip()
 
-    # Condition
     valid_conditions = ["New with tags","New without tags","Very good","Good","Satisfactory"]
     condition = ""
     for span in soup.select('span.web_ui__Text__bold'):
@@ -61,13 +56,8 @@ def fetch_vinted(url):
             condition = text
             break
 
-    # Brand detection: look for itemprop OR <a href="/brand/..."><span>
     brand_tag = soup.select_one('span[itemprop="name"]')
-    if brand_tag:
-        brand = brand_tag.get_text(strip=True)
-    else:
-        brand_a = soup.select_one('a[href^="/brand/"] span')
-        brand = brand_a.get_text(strip=True) if brand_a else ""
+    brand = brand_tag.get_text(strip=True) if brand_tag else ""
 
     return {
         "title": title,
@@ -99,7 +89,7 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
         else:
             lines = [text[:last_space], text[last_space+1:]]
 
-    # Extra offset if 2 lines
+    # Apply extra offset if 2 lines
     extra_offset = 20 if len(lines) > 1 else 0
 
     if len(lines) > 1:
@@ -202,20 +192,13 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
 
     draw = ImageDraw.Draw(img)
 
-    # Draw title & get extra offset if 2 lines
+    # Draw title block and get extra_offset if 2 lines
     cfg = blocks_config["Block 1"]
-    extra_offset = draw_text_block(
-        draw,
-        info.get("title",""),
-        cfg["x"],
-        cfg["y"] + text_offset,
-        cfg["height"],
-        "#15191a" if mode_theme=="Light Mode" else cfg["color"],
-        cfg["underline"],
-        is_currency=False
-    )
+    extra_offset = draw_text_block(draw, info.get("title",""), cfg["x"], cfg["y"] + text_offset, cfg["height"], 
+                                   "#15191a" if mode_theme=="Light Mode" else cfg["color"], 
+                                   cfg["underline"], is_currency=False)
 
-    # Draw Item Size block + apply extra_offset if title has 2 lines
+    # Draw Item Size / Condition / Brand block with extra_offset applied
     draw_item_size_block(
         draw,
         info.get("size",""),
@@ -227,13 +210,16 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
         mode_theme
     )
 
-    # Draw price and buyer fee
-    for block in ["Item Price","Buyer Fee"]:
-        text = all_texts[block]
+    # Draw remaining blocks
+    for block, text in all_texts.items():
         cfg = blocks_config[block]
+        if block == "Block 1":
+            continue  # already drawn
         color = cfg["color"]
-        if mode_theme=="Light Mode" and block=="Item Price":
+        if block == "Item Price" and mode_theme=="Light Mode":
             color = "#606b6c"
+        if block == "Block 1" and mode_theme=="Light Mode":
+            color = "#15191a"
         draw_text_block(draw, text, cfg["x"], cfg["y"] + text_offset, cfg["height"], color, cfg["underline"], is_currency=True)
 
     # Crop to 16:9
@@ -246,7 +232,7 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)
+mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)  # default = Dark
 
 bg_colors = {
     "Red": "#b04c5c",
@@ -258,7 +244,6 @@ bg_colors = {
 
 mode = st.radio("Choose Mode", ["Single URL","Bulk URLs"])
 
-# -------- SINGLE URL MODE --------
 if mode == "Single URL":
     color_name = st.selectbox("Select Background Color", list(bg_colors.keys()), index=0)
     bg_color = bg_colors[color_name]
@@ -288,13 +273,13 @@ if mode == "Single URL":
             st.image(img_cropped)
             output_path = os.path.join(script_dir,"output.jpeg")
             img_cropped.convert("RGB").save(output_path)
+
             col1, col2 = st.columns([1,3])
             with col1:
                 st.download_button("Download Image", open(output_path,"rb"), "output.jpeg", mime="image/jpeg")
             with col2:
                 st.markdown("**Hold Image Above To Save Instead of Download**")
 
-# -------- BULK URL MODE --------
 elif mode == "Bulk URLs":
     urls_text = st.text_area("Paste multiple Vinted URLs (comma or newline separated)")
     urls = [u.strip() for u in re.split(r"[\n,]", urls_text) if u.strip()]
@@ -317,6 +302,7 @@ elif mode == "Bulk URLs":
                     bg_color = random.choice(list(bg_colors.values()))
                     base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
                     img_cropped = generate_image(info, product_img, bg_color, base_img_path, mode_theme)
+
                     out_path = f"bulk_image_{i}.jpeg"
                     img_cropped.convert("RGB").save(out_path)
                     zipf.write(out_path)
