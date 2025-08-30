@@ -87,9 +87,9 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
 
     # Adjust font slightly smaller and move down if 2 lines
     if len(lines) > 1:
-        font_size -= 1  # slightly smaller
+        font_size -= 2  # slightly smaller
         font = ImageFont.truetype(font_path, font_size)
-        y += 5  # move down a bit
+        y += 8  # move down a bit
 
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h
@@ -157,14 +157,17 @@ def generate_image(info, product_img, bg_color):
     background.paste(bg_rect,(overlay_left,ot))
     img = Image.alpha_composite(base_img, background)
 
-    # Paste product image at 2x original size, centered
+    # Paste product image, scaled to max 75% of overlay size, centered
     if product_img:
+        max_w = int(ow * 0.75)
+        max_h = int(oh * 0.75)
         img_w, img_h = product_img.size
-        img_w *= 2
-        img_h *= 2
-        product_img_resized = product_img.resize((img_w, img_h), Image.Resampling.LANCZOS)
-        paste_x = overlay_left + (ow - img_w)//2
-        paste_y = ot + (oh - img_h)//2
+        scale = min(max_w / img_w, max_h / img_h, 1)  # scale <= 1 to avoid enlarging past original if small
+        new_w = int(img_w * scale)
+        new_h = int(img_h * scale)
+        product_img_resized = product_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        paste_x = overlay_left + (ow - new_w)//2
+        paste_y = ot + (oh - new_h)//2
         img.paste(product_img_resized, (paste_x, paste_y), product_img_resized)
 
     draw = ImageDraw.Draw(img)
@@ -193,7 +196,6 @@ def generate_image(info, product_img, bg_color):
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-# 🎨 Updated Background Colors
 bg_colors = {
     "Red": "#b04c5c",
     "Green": "#689E9C",
