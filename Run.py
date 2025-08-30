@@ -160,10 +160,13 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
     overlay_left,ot,overlay_right,ob = overlay_box
     ow,oh = overlay_right-overlay_left, ob-ot
 
+    # Offset only for Light Mode
+    offset_y = 16 if mode_theme == "Light Mode" else 0
+
     # Background rectangle
     bg_rect = Image.new("RGBA",(ow,oh),bg_color)
     background = Image.new("RGBA", base_img.size, (0,0,0,0))
-    background.paste(bg_rect,(overlay_left,ot))
+    background.paste(bg_rect,(overlay_left, ot + offset_y))
     img = Image.alpha_composite(base_img, background)
 
     # Resize AFTER background removal
@@ -175,7 +178,7 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
         new_h = int(img_h * scale)
         product_img_resized = product_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
         paste_x = overlay_left + (ow - new_w)//2
-        paste_y = ot + (oh - new_h)//2
+        paste_y = ot + offset_y + (oh - new_h)//2
         img.paste(product_img_resized, (paste_x, paste_y), product_img_resized)
 
     draw = ImageDraw.Draw(img)
