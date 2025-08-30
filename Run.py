@@ -87,7 +87,7 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
 
     # Adjust font smaller and move down if 2 lines
     if len(lines) > 1:
-        font_size -= 3  # smaller than single-line font
+        font_size -= 3
         font = ImageFont.truetype(font_path, font_size)
         y += 10  # move down slightly
 
@@ -157,10 +157,11 @@ def generate_image(info, product_img, bg_color):
     background.paste(bg_rect,(overlay_left,ot))
     img = Image.alpha_composite(base_img, background)
 
-    # Paste product image: width 800 px based on background-removed image
+    # Resize AFTER background removal
     if product_img:
+        # Ensure product_img is the background-removed version
         target_width = 800
-        img_w, img_h = product_img.size  # this is after remove()
+        img_w, img_h = product_img.size
         scale = target_width / img_w
         new_w = int(img_w * scale)
         new_h = int(img_h * scale)
@@ -206,4 +207,61 @@ bg_colors = {
 mode = st.radio("Choose Mode", ["Single URL","Bulk URLs"])
 
 if mode == "Single URL":
-    color_name = st.selectbox("Select Background
+    color_name = st.selectbox("Select Background Color", list(bg_colors.keys()), index=0)
+    bg_color = bg_colors[color_name]
+    url = st.text_input("Paste Vinted URL")
+
+    uploaded_file = st.file_uploader("Optional: Use Your Own Image", type=["png","jpg","jpeg"])
+    if uploaded_file:
+        bg_removed = remove(Image.open(uploaded_file).convert("RGBA"))
+        st.session_state.cache[url] = {"info": None, "img": bg_removed}
+
+    if url and url not in st.session_state.cache:
+        info = fetch_vinted(url)
+        product_img = None
+        if info["image"]:
+            img_data = requests.get(info["image"]).content
+            product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
+        st.session_state.cache[url] = {"info": info, "img": product_img}
+
+    if st.button("Generate Image") and url in st.session_state.cache:
+        data = st.session_state.cache[url]
+        info, product_img = data["info"], data["img"]
+        img_cropped = generate_image(info, product_img, bg_color)
+        st.image(img_cropped)
+        output_path = os.path.join(script_dir,"output.jpeg")
+        img_cropped.convert("RGB").save(output_path)
+
+        col1, col2 = st.columns([1,3])
+        with col1:
+            st.download_button("Download Image", open(output_path,"rb"), "output.jpeg", mime="image/jpeg")
+        with col2:
+            st.markdown("**Hold Image Above To Save Instead of Download**")
+
+elif mode == "Bulk URLs":
+    urls_text = st.text_area("Paste multiple Vinted URLs (comma or newline separated)")
+    urls = [u.strip() for u in re.split(r"[\n,]", urls_text) if u.strip()]
+
+    if st.button("Generate Bulk Images") and urls:
+        zip_path = os.path.join(script_dir, "bulk_output.zip")
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            for i, url in enumerate(urls, 1):
+                if url not in st.session_state.cache:
+                    info = fetch_vinted(url)
+                    product_img = None
+                    if info["image"]:
+                        img_data = requests.get(info["image"]).content
+                        product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
+                    st.session_state.cache[url] = {"info": info, "img": product_img}
+
+                data = st.session_state.cache[url]
+                info, product_img = data["info"], data["img"]
+                bg_color = random.choice(list(bg_colors.values()))
+                img_cropped = generate_image(info, product_img, bg_color)
+
+                out_path = f"bulk_image_{i}.jpeg"
+                img_cropped.convert("RGB").save(out_path)
+                zipf.write(out_path)
+                st.image(img_cropped, caption=f"Image {i}")
+
+        st.download_button("Download All as ZIP", open(zip_path,"rb"), "bulk_output.zip", mime="application/zip")
