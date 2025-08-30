@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 script_dir = os.path.dirname(os.path.realpath(__file__))
 image_path = os.path.join(script_dir, "Base2.JPEG")
 font_path = os.path.join(script_dir, "Arial.ttf")
-overlay_box = (0, 0, 828, 1088)
+overlay_box = (0, 0, 828, 1088)  # background overlay size
 
 blocks_config = {
     "Block 1": {"x": 20, "y": 1240, "height": 40, "color": "#dbdfde", "underline": False},
@@ -85,11 +85,11 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
         else:
             lines = [text[:last_space], text[last_space+1:]]
 
-    # Adjust font slightly smaller and move down if 2 lines
+    # Adjust font smaller and move down if 2 lines
     if len(lines) > 1:
-        font_size -= 2  # slightly smaller
+        font_size -= 3  # smaller than previous
         font = ImageFont.truetype(font_path, font_size)
-        y += 8  # move down a bit
+        y += 10  # move down a bit more
 
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h
@@ -157,12 +157,11 @@ def generate_image(info, product_img, bg_color):
     background.paste(bg_rect,(overlay_left,ot))
     img = Image.alpha_composite(base_img, background)
 
-    # Paste product image, scaled to max 75% of overlay size, centered
+    # Paste product image: max 828x828 centered, aspect ratio preserved
     if product_img:
-        max_w = int(ow * 0.75)
-        max_h = int(oh * 0.75)
+        max_size = 828
         img_w, img_h = product_img.size
-        scale = min(max_w / img_w, max_h / img_h, 1)  # scale <= 1 to avoid enlarging past original if small
+        scale = min(max_size / img_w, max_size / img_h, 1)  # scale to fit 828x828
         new_w = int(img_w * scale)
         new_h = int(img_h * scale)
         product_img_resized = product_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
