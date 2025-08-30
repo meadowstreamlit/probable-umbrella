@@ -7,7 +7,8 @@ from bs4 import BeautifulSoup
 
 # -------------------- SETTINGS --------------------
 script_dir = os.path.dirname(os.path.realpath(__file__))
-image_path = os.path.join(script_dir, "Base2.JPEG")
+image_dark = os.path.join(script_dir, "Base2.JPEG")
+image_light = os.path.join(script_dir, "Base3.jpg")
 font_path = os.path.join(script_dir, "Arial.ttf")
 overlay_box = (0, 0, 828, 1088)  # background overlay size
 
@@ -105,7 +106,7 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
             y_line = bbox[3]
             draw.line((bbox[0], y_line, bbox[2], y_line), fill=color, width=2)
 
-def draw_item_size_block(draw, size, condition, brand, x, y, h):
+def draw_item_size_block(draw, size, condition, brand, x, y, h, mode_theme):
     spacing = 6
     cur_x = x
     font_size = 10
@@ -115,39 +116,47 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h):
         font = ImageFont.truetype(font_path, font_size)
     y_offset = y-(font.getmetrics()[0]+font.getmetrics()[1])//2
 
+    # Set colors based on theme
+    if mode_theme == "Light Mode":
+        text_color = "#606b6c"
+        brand_color = "#648a93"
+    else:
+        text_color = "#99a2a1"
+        brand_color = "#648a93"
+
     if size:
-        draw.text((cur_x, y_offset), size, fill="#99a2a1", font=font)
+        draw.text((cur_x, y_offset), size, fill=text_color, font=font)
         cur_x += draw.textlength(size, font=font) + spacing
 
-    draw.text((cur_x, y_offset), "·", fill="#99a2a1", font=font)
+    draw.text((cur_x, y_offset), "·", fill=text_color, font=font)
     cur_x += draw.textlength("·", font=font) + spacing
 
     if condition:
-        draw.text((cur_x, y_offset), condition, fill="#99a2a1", font=font)
+        draw.text((cur_x, y_offset), condition, fill=text_color, font=font)
         cur_x += draw.textlength(condition, font=font) + spacing
 
-    draw.text((cur_x, y_offset), "·", fill="#99a2a1", font=font)
+    draw.text((cur_x, y_offset), "·", fill=text_color, font=font)
     cur_x += draw.textlength("·", font=font) + spacing
 
     if brand:
-        draw.text((cur_x, y_offset), brand, fill="#648a93", font=font)
+        draw.text((cur_x, y_offset), brand, fill=brand_color, font=font)
         bbox = draw.textbbox((cur_x, y_offset), brand, font=font)
         y_line = bbox[3]
-        draw.line((bbox[0], y_line, bbox[2], y_line), fill="#648a93", width=2)
+        draw.line((bbox[0], y_line, bbox[2], y_line), fill=brand_color, width=2)
 
 # ------------------- SESSION STATE -------------------
 if "cache" not in st.session_state:
     st.session_state.cache = {}
 
 # ------------------- GENERATE IMAGE FUNCTION -------------------
-def generate_image(info, product_img, bg_color):
+def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
     all_texts = {
         "Block 1": info.get("title",""),
         "Item Price": info.get("price",""),
         "Buyer Fee": info.get("buyer_fee","")
     }
 
-    base_img = Image.open(image_path).convert("RGBA")
+    base_img = Image.open(base_img_path).convert("RGBA")
     overlay_left,ot,overlay_right,ob = overlay_box
     ow,oh = overlay_right-overlay_left, ob-ot
 
@@ -159,7 +168,6 @@ def generate_image(info, product_img, bg_color):
 
     # Resize AFTER background removal
     if product_img:
-        # Scale to 800px width based on background removed image
         target_width = 800
         img_w, img_h = product_img.size
         scale = target_width / img_w
@@ -179,12 +187,20 @@ def generate_image(info, product_img, bg_color):
         info.get("brand",""),
         blocks_config["Item Size"]["x"],
         blocks_config["Item Size"]["y"],
-        blocks_config["Item Size"]["height"]
+        blocks_config["Item Size"]["height"],
+        mode_theme
     )
 
+    # Adjust title color for light mode
     for block, text in all_texts.items():
         cfg = blocks_config[block]
-        draw_text_block(draw, text, cfg["x"], cfg["y"], cfg["height"], cfg["color"], cfg["underline"],
+        if block == "Block 1" and mode_theme == "Light Mode":
+            color = "#15191a"
+        elif block == "Item Price":
+            color = "#99a2a1"
+        else:
+            color = cfg["color"]
+        draw_text_block(draw, text, cfg["x"], cfg["y"], cfg["height"], color, cfg["underline"],
                         is_currency=True)
 
     fw, fh = img.width, int(img.width*16/9)
@@ -195,6 +211,9 @@ def generate_image(info, product_img, bg_color):
 
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
+
+# ---------------- Theme and Colors ----------------
+mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)  # default = Dark
 
 bg_colors = {
     "Red": "#b04c5c",
@@ -230,7 +249,8 @@ if mode == "Single URL":
         with st.spinner("Generating image..."):
             data = st.session_state.cache[url]
             info, product_img = data["info"], data["img"]
-            img_cropped = generate_image(info, product_img, bg_color)
+            base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
+            img_cropped = generate_image(info, product_img, bg_color, base_img_path, mode_theme)
             st.image(img_cropped)
             output_path = os.path.join(script_dir,"output.jpeg")
             img_cropped.convert("RGB").save(output_path)
@@ -261,7 +281,8 @@ elif mode == "Bulk URLs":
                     data = st.session_state.cache[url]
                     info, product_img = data["info"], data["img"]
                     bg_color = random.choice(list(bg_colors.values()))
-                    img_cropped = generate_image(info, product_img, bg_color)
+                    base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
+                    img_cropped = generate_image(info, product_img, bg_color, base_img_path, mode_theme)
 
                     out_path = f"bulk_image_{i}.jpeg"
                     img_cropped.convert("RGB").save(out_path)
