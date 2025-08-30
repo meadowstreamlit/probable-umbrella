@@ -66,16 +66,6 @@ def fetch_vinted(url):
     }
 
 # ------------------- HELPERS -------------------
-def resize_and_crop(img, w, h):
-    ratio, target = img.width/img.height, w/h
-    if ratio > target:
-        scale_h, scale_w = h, int(h*ratio)
-    else:
-        scale_w, scale_h = w, int(h/ratio)
-    img = img.resize((scale_w, scale_h), Image.Resampling.LANCZOS)
-    left, top = (img.width-w)//2, (img.height-h)//2
-    return img.crop((left, top, left+w, top+h))
-
 def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=False):
     if not text: return
     font_size = 10
@@ -83,19 +73,31 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
     while font.getmetrics()[0]+font.getmetrics()[1] < h:
         font_size += 1
         font = ImageFont.truetype(font_path, font_size)
-    y_offset = y-(font.getmetrics()[0]+font.getmetrics()[1])//2
 
-    if is_currency and text.startswith("£"):
-        number_text = text[1:]
-        draw.text((x, y_offset), "£", fill=color, font=font)
-        draw.text((x + draw.textlength("£", font=font), y_offset), number_text, fill=color, font=font)
+    # Split title into lines if necessary (50 chars, word boundary)
+    lines = []
+    if len(text) <= 50:
+        lines = [text]
     else:
-        draw.text((x, y_offset), text, fill=color, font=font)
+        last_space = text[:50].rfind(" ")
+        if last_space == -1:
+            lines = [text[:50], text[50:]]
+        else:
+            lines = [text[:last_space], text[last_space+1:]]
 
-    if underline:
-        bbox = draw.textbbox((x, y_offset), text, font=font)
-        y_line = bbox[3]
-        draw.line((bbox[0], y_line, bbox[2], y_line), fill=color, width=2)
+    for i, line in enumerate(lines):
+        y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h
+        if is_currency and line.startswith("£"):
+            number_text = line[1:]
+            draw.text((x, y_offset), "£", fill=color, font=font)
+            draw.text((x + draw.textlength("£", font=font), y_offset), number_text, fill=color, font=font)
+        else:
+            draw.text((x, y_offset), line, fill=color, font=font)
+
+        if underline:
+            bbox = draw.textbbox((x, y_offset), line, font=font)
+            y_line = bbox[3]
+            draw.line((bbox[0], y_line, bbox[2], y_line), fill=color, width=2)
 
 def draw_item_size_block(draw, size, condition, brand, x, y, h):
     spacing = 6
@@ -143,14 +145,18 @@ def generate_image(info, product_img, bg_color):
     overlay_left,ot,overlay_right,ob = overlay_box
     ow,oh = overlay_right-overlay_left, ob-ot
 
+    # Background rectangle
     bg_rect = Image.new("RGBA",(ow,oh),bg_color)
     background = Image.new("RGBA", base_img.size, (0,0,0,0))
     background.paste(bg_rect,(overlay_left,ot))
     img = Image.alpha_composite(base_img, background)
 
+    # Paste product image at original size, centered
     if product_img:
-        overlay = resize_and_crop(product_img, ow, oh)
-        img.paste(overlay, (overlay_left, ot), overlay)
+        img_w, img_h = product_img.size
+        paste_x = overlay_left + (ow - img_w)//2
+        paste_y = ot + (oh - img_h)//2
+        img.paste(product_img, (paste_x, paste_y), product_img)
 
     draw = ImageDraw.Draw(img)
 
@@ -178,7 +184,7 @@ def generate_image(info, product_img, bg_color):
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-# 🎨 Updated Background Colors (your request)
+# 🎨 Updated Background Colors
 bg_colors = {
     "Red": "#b04c5c",
     "Green": "#689E9C",
@@ -201,7 +207,6 @@ if mode == "Single URL":
             "img": Image.open(uploaded_file).convert("RGBA")
         }
 
-    # Early fetch silently in background
     if url and url not in st.session_state.cache:
         info = fetch_vinted(url)
         product_img = None
