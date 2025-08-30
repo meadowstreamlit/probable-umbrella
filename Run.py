@@ -178,7 +178,14 @@ def generate_image(info, product_img, bg_color):
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-bg_colors = {"White":"#ffffff","Blue":"#3399ff","Green":"#33cc33","Purple":"#9933ff","Red":"#ff3333","Rose":"#ff66cc"}
+# 🎨 Updated Background Colors (your request)
+bg_colors = {
+    "Red": "#b04c5c",
+    "Green": "#689E9C",
+    "Blue": "#4E6FA4",
+    "Rose": "#FE8AB1",
+    "Purple": "#948EF2"
+}
 
 mode = st.radio("Choose Mode", ["Single URL","Bulk URLs"])
 
