@@ -108,15 +108,18 @@ def fetch_vinted(url):
     r = requests.get(url, headers=headers)
     soup = BeautifulSoup(r.text, "html.parser")
 
+    # Title without emojis
     title_tag = soup.select_one("h1.web_ui__Text__title")
     title = title_tag.get_text(strip=True) if title_tag else ""
     title = remove_emojis(title)
 
+    # Price
     price_tag = soup.select_one("p.web_ui__Text__subtitle")
     price_text = price_tag.get_text(strip=True) if price_tag else ""
     price_val = float(re.sub(r"[^0-9.]", "", price_text) or 0)
     buyer_fee = round(price_val * 1.06, 2)
 
+    # Product image
     image = None
     for img in soup.find_all("img"):
         src = img.get("src")
@@ -124,6 +127,7 @@ def fetch_vinted(url):
             image = src
             break
 
+    # Size via "Size information" button
     size = ""
     size_button = soup.select_one('button[aria-label="Size information"], button[title="Size information"]')
     if size_button and size_button.parent:
@@ -131,6 +135,7 @@ def fetch_vinted(url):
         if candidate:
             size = candidate.strip()
 
+    # Condition
     valid_conditions = ["New with tags","New without tags","Very good","Good","Satisfactory"]
     condition = ""
     for span in soup.select('span.web_ui__Text__bold'):
@@ -139,6 +144,7 @@ def fetch_vinted(url):
             condition = text
             break
 
+    # Brand via <a href="/brand/..."><span>Brand</span></a>
     brand_tag = soup.select_one('a[href^="/brand/"] span')
     brand = brand_tag.get_text(strip=True) if brand_tag else ""
 
@@ -157,72 +163,75 @@ if "cache" not in st.session_state:
     st.session_state.cache = {}
 
 # ------------------- GENERATE IMAGE FUNCTION -------------------
-def generate_image(info, product_img, bg_color, base_img_path, mode_theme, is_uploaded=False):
+def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
     all_texts = {
-        "Block 1": info.get("title","") if info else "",
-        "Item Price": info.get("price","") if info else "",
-        "Buyer Fee": info.get("buyer_fee","") if info else ""
+        "Block 1": info.get("title",""),
+        "Item Price": info.get("price",""),
+        "Buyer Fee": info.get("buyer_fee","")
     }
 
     base_img = Image.open(base_img_path).convert("RGBA")
-    overlay_left, ot, overlay_right, ob = overlay_box
-    ow, oh = overlay_right - overlay_left, ob - ot
+    overlay_left,ot,overlay_right,ob = overlay_box
+    ow,oh = overlay_right-overlay_left, ob-ot
 
-    bg_rect = Image.new("RGBA", (ow, oh), bg_color)
-    background = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
+    bg_rect = Image.new("RGBA",(ow,oh),bg_color)
+    background = Image.new("RGBA", base_img.size, (0,0,0,0))
 
-    img_offset = 0 if is_uploaded else (16 if mode_theme=="Light Mode" else 0)
-    text_offset = 0 if is_uploaded else (10 if mode_theme=="Light Mode" else 0)
+    img_offset = 0
+    text_offset = 0
+    if mode_theme == "Light Mode":
+        img_offset = 16
+        text_offset = 10
+        fill_band = Image.new("RGBA", (ow, img_offset), bg_color)
+        background.paste(fill_band, (overlay_left, ot))
 
-    background.paste(bg_rect, (overlay_left, ot + img_offset))
+    background.paste(bg_rect, (overlay_left, ot+img_offset))
     img = Image.alpha_composite(base_img, background)
 
     if product_img:
+        target_width = 800
         img_w, img_h = product_img.size
-        scale = max(ow / img_w, oh / img_h)
+        scale = target_width / img_w
         new_w = int(img_w * scale)
         new_h = int(img_h * scale)
-        resized = product_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-        left = (new_w - ow) // 2
-        top = (new_h - oh) // 2
-        cropped = resized.crop((left, top, left + ow, top + oh))
-
-        paste_y = ot if is_uploaded else ot + img_offset
-        img.paste(cropped, (overlay_left, paste_y), cropped)
+        product_img_resized = product_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        paste_x = overlay_left + (ow - new_w)//2
+        paste_y = ot + (oh - new_h)//2 + img_offset
+        img.paste(product_img_resized, (paste_x, paste_y), product_img_resized)
 
     draw = ImageDraw.Draw(img)
 
-    if info:
-        cfg = blocks_config["Block 1"]
-        extra_offset = draw_text_block(draw, info.get("title",""), cfg["x"], cfg["y"] + text_offset, cfg["height"], 
-                                       "#15191a" if mode_theme=="Light Mode" else cfg["color"], 
-                                       cfg["underline"], is_currency=False)
+    # Draw title block and get extra_offset if 2 lines
+    cfg = blocks_config["Block 1"]
+    extra_offset = draw_text_block(draw, info.get("title",""), cfg["x"], cfg["y"] + text_offset, cfg["height"], 
+                                   "#15191a" if mode_theme=="Light Mode" else cfg["color"], 
+                                   cfg["underline"], is_currency=False)
 
-        draw_item_size_block(
-            draw,
-            info.get("size",""),
-            info.get("condition",""),
-            info.get("brand",""),
-            blocks_config["Item Size"]["x"],
-            blocks_config["Item Size"]["y"] + text_offset + extra_offset,
-            blocks_config["Item Size"]["height"],
-            mode_theme
-        )
+    # Draw Item Size / Condition / Brand block with extra_offset applied
+    draw_item_size_block(
+        draw,
+        info.get("size",""),
+        info.get("condition",""),
+        info.get("brand",""),
+        blocks_config["Item Size"]["x"],
+        blocks_config["Item Size"]["y"] + text_offset + extra_offset,
+        blocks_config["Item Size"]["height"],
+        mode_theme
+    )
 
-        for block, text in all_texts.items():
-            cfg = blocks_config[block]
-            if block == "Block 1":
-                continue
-            color = cfg["color"]
-            if block == "Item Price" and mode_theme=="Light Mode":
-                color = "#606b6c"
-            draw_text_block(draw, text, cfg["x"], cfg["y"] + text_offset, cfg["height"], color, cfg["underline"], is_currency=True)
+    # Draw remaining blocks
+    for block, text in all_texts.items():
+        cfg = blocks_config[block]
+        if block == "Block 1":
+            continue  # already drawn
+        color = cfg["color"]
+        if block == "Item Price" and mode_theme=="Light Mode":
+            color = "#606b6c"
+        draw_text_block(draw, text, cfg["x"], cfg["y"] + text_offset, cfg["height"], color, cfg["underline"], is_currency=True)
 
+    # Crop to 16:9
     fw, fh = img.width, int(img.width*16/9)
-    if fh > img.height:
-        fh = img.height
-        fw = int(fh*9/16)
+    if fh>img.height: fh=img.height; fw=int(fh*9/16)
     left, top = (img.width-fw)//2, (img.height-fh)//2
     img_cropped = img.crop((left, top, left+fw, top+fh))
     return img_cropped
@@ -230,7 +239,7 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme, is_up
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)
+mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)  # default = Dark
 
 bg_colors = {
     "Red": "#b04c5c",
@@ -242,7 +251,6 @@ bg_colors = {
 
 mode = st.radio("Choose Mode", ["Single URL","Bulk URLs"])
 
-# ------------------- SINGLE URL -------------------
 if mode == "Single URL":
     color_name = st.selectbox("Select Background Color", list(bg_colors.keys()), index=0)
     bg_color = bg_colors[color_name]
@@ -250,37 +258,35 @@ if mode == "Single URL":
 
     uploaded_file = st.file_uploader("Optional: Use Your Own Image", type=["png","jpg","jpeg"])
     if uploaded_file:
-        product_img = Image.open(uploaded_file).convert("RGBA")
-        st.session_state.cache["uploaded_img"] = {"info": None, "img": product_img}
+        with st.spinner("Removing background and preparing image..."):
+            bg_removed = remove(Image.open(uploaded_file).convert("RGBA"))
+            st.session_state.cache[url] = {"info": None, "img": bg_removed}
 
     if url and url not in st.session_state.cache:
-        info = fetch_vinted(url)
-        product_img_vinted = None
-        if info["image"]:
-            img_data = requests.get(info["image"]).content
-            product_img_vinted = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
-        st.session_state.cache[url] = {"info": info, "img": product_img_vinted}
+        with st.spinner("Fetching Vinted info and image..."):
+            info = fetch_vinted(url)
+            product_img = None
+            if info["image"]:
+                img_data = requests.get(info["image"]).content
+                product_img = remove(Image.open(BytesIO(img_data)).convert("RGBA"))
+            st.session_state.cache[url] = {"info": info, "img": product_img}
 
-    cache_key = "uploaded_img" if uploaded_file else url
+    if st.button("Generate Image") and url in st.session_state.cache:
+        with st.spinner("Generating image..."):
+            data = st.session_state.cache[url]
+            info, product_img = data["info"], data["img"]
+            base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
+            img_cropped = generate_image(info, product_img, bg_color, base_img_path, mode_theme)
+            st.image(img_cropped)
+            output_path = os.path.join(script_dir,"output.jpeg")
+            img_cropped.convert("RGB").save(output_path)
 
-    if st.button("Generate Image") and cache_key in st.session_state.cache:
-        data = st.session_state.cache[cache_key]
-        info_obj = st.session_state.cache[url]["info"] if url else None
-        product_img_obj = data["img"]
-        base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
-        is_uploaded = uploaded_file is not None
-        img_cropped = generate_image(info_obj, product_img_obj, bg_color, base_img_path, mode_theme, is_uploaded=is_uploaded)
-        st.image(img_cropped)
-        output_path = os.path.join(script_dir,"output.jpeg")
-        img_cropped.convert("RGB").save(output_path)
+            col1, col2 = st.columns([1,3])
+            with col1:
+                st.download_button("Download Image", open(output_path,"rb"), "output.jpeg", mime="image/jpeg")
+            with col2:
+                st.markdown("**Hold Image Above To Save Instead of Download**")
 
-        col1, col2 = st.columns([1,3])
-        with col1:
-            st.download_button("Download Image", open(output_path,"rb"), "output.jpeg", mime="image/jpeg")
-        with col2:
-            st.markdown("**Hold Image Above To Save Instead of Download**")
-
-# ------------------- BULK URL -------------------
 elif mode == "Bulk URLs":
     urls_text = st.text_area("Paste multiple Vinted URLs (comma or newline separated)")
     urls = [u.strip() for u in re.split(r"[\n,]", urls_text) if u.strip()]
@@ -299,10 +305,10 @@ elif mode == "Bulk URLs":
                         st.session_state.cache[url] = {"info": info, "img": product_img}
 
                     data = st.session_state.cache[url]
-                    info_obj, product_img_obj = data["info"], data["img"]
+                    info, product_img = data["info"], data["img"]
                     bg_color = random.choice(list(bg_colors.values()))
                     base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
-                    img_cropped = generate_image(info_obj, product_img_obj, bg_color, base_img_path, mode_theme)
+                    img_cropped = generate_image(info, product_img, bg_color, base_img_path, mode_theme)
 
                     out_path = f"bulk_image_{i}.jpeg"
                     img_cropped.convert("RGB").save(out_path)
@@ -310,3 +316,4 @@ elif mode == "Bulk URLs":
                     st.image(img_cropped, caption=f"Image {i}")
 
         st.download_button("Download All as ZIP", open(zip_path,"rb"), "bulk_output.zip", mime="application/zip")
+
