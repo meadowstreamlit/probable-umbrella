@@ -7,16 +7,17 @@ from bs4 import BeautifulSoup
 
 # -------------------- SETTINGS --------------------
 script_dir = os.path.dirname(os.path.realpath(__file__))
-image_dark = os.path.join(script_dir, "Base2.JPEG")
-image_light = os.path.join(script_dir, "Base3.jpg")
+image_path_dark = os.path.join(script_dir, "Base2.JPEG")
+image_path_light = os.path.join(script_dir, "Base3.jpg")
 font_path = os.path.join(script_dir, "Arial.ttf")
 overlay_box = (0, 0, 828, 1088)  # background overlay size
 
+# ------------------- BLOCK CONFIG -------------------
 blocks_config = {
-    "Block 1": {"x": 20, "y": 1240, "height": 40, "color": "#dbdfde", "underline": False},
-    "Item Size": {"x": 20, "y": 1290, "height": 38, "color": "#99a2a1", "underline": False},
-    "Item Price": {"x": 20, "y": 1365, "height": 33, "color": "#99a2a1", "underline": False},
-    "Buyer Fee": {"x": 20, "y": 1408, "height": 38, "color": "#648a93", "underline": False},
+    "Block 1": {"x": 20, "y": 1240, "height": 40, "color_dark": "#dbdfde", "color_light": "#15191a", "underline": False},
+    "Item Size": {"x": 20, "y": 1290, "height": 38, "color_dark": "#99a2a1", "color_light": "#606b6c", "underline": False},
+    "Item Price": {"x": 20, "y": 1365, "height": 33, "color_dark": "#99a2a1", "color_light": "#606b6c", "underline": False},
+    "Buyer Fee": {"x": 20, "y": 1408, "height": 38, "color_dark": "#648a93", "color_light": "#648a93", "underline": False},
 }
 
 # ------------------- VINTED SCRAPER -------------------
@@ -106,7 +107,7 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
             y_line = bbox[3]
             draw.line((bbox[0], y_line, bbox[2], y_line), fill=color, width=2)
 
-def draw_item_size_block(draw, size, condition, brand, x, y, h, mode_theme):
+def draw_item_size_block(draw, size, condition, brand, x, y, h, offset_y, light_mode):
     spacing = 6
     cur_x = x
     font_size = 10
@@ -114,59 +115,58 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h, mode_theme):
     while font.getmetrics()[0]+font.getmetrics()[1] < h:
         font_size += 1
         font = ImageFont.truetype(font_path, font_size)
-    y_offset = y-(font.getmetrics()[0]+font.getmetrics()[1])//2
+    y_offset = y-(font.getmetrics()[0]+font.getmetrics()[1])//2 + offset_y
 
-    # Set colors based on theme
-    if mode_theme == "Light Mode":
-        text_color = "#606b6c"
-        brand_color = "#648a93"
-    else:
-        text_color = "#99a2a1"
-        brand_color = "#648a93"
+    # Light/Dark colors
+    color_size = "#606b6c" if light_mode else "#99a2a1"
+    color_cond = "#606b6c" if light_mode else "#99a2a1"
+    color_brand = "#648a93"
 
     if size:
-        draw.text((cur_x, y_offset), size, fill=text_color, font=font)
+        draw.text((cur_x, y_offset), size, fill=color_size, font=font)
         cur_x += draw.textlength(size, font=font) + spacing
 
-    draw.text((cur_x, y_offset), "·", fill=text_color, font=font)
+    draw.text((cur_x, y_offset), "·", fill=color_cond, font=font)
     cur_x += draw.textlength("·", font=font) + spacing
 
     if condition:
-        draw.text((cur_x, y_offset), condition, fill=text_color, font=font)
+        draw.text((cur_x, y_offset), condition, fill=color_cond, font=font)
         cur_x += draw.textlength(condition, font=font) + spacing
 
-    draw.text((cur_x, y_offset), "·", fill=text_color, font=font)
+    draw.text((cur_x, y_offset), "·", fill=color_cond, font=font)
     cur_x += draw.textlength("·", font=font) + spacing
 
     if brand:
-        draw.text((cur_x, y_offset), brand, fill=brand_color, font=font)
+        draw.text((cur_x, y_offset), brand, fill=color_brand, font=font)
         bbox = draw.textbbox((cur_x, y_offset), brand, font=font)
         y_line = bbox[3]
-        draw.line((bbox[0], y_line, bbox[2], y_line), fill=brand_color, width=2)
+        draw.line((bbox[0], y_line, bbox[2], y_line), fill=color_brand, width=2)
 
 # ------------------- SESSION STATE -------------------
 if "cache" not in st.session_state:
     st.session_state.cache = {}
 
 # ------------------- GENERATE IMAGE FUNCTION -------------------
-def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
+def generate_image(info, product_img, bg_color, mode_theme):
     all_texts = {
         "Block 1": info.get("title",""),
         "Item Price": info.get("price",""),
         "Buyer Fee": info.get("buyer_fee","")
     }
 
-    base_img = Image.open(base_img_path).convert("RGBA")
+    # pick base template
+    base_img = Image.open(image_path_light if mode_theme=="Light Mode" else image_path_dark).convert("RGBA")
+
     overlay_left,ot,overlay_right,ob = overlay_box
     ow,oh = overlay_right-overlay_left, ob-ot
 
-    # Offset only for Light Mode
-    offset_y = 16 if mode_theme == "Light Mode" else 0
+    # offset only for light mode
+    offset_y = 16 if mode_theme=="Light Mode" else 0
 
-    # Background rectangle
-    bg_rect = Image.new("RGBA",(ow,oh),bg_color)
+    # extend background upwards by 16 in light mode
+    bg_rect = Image.new("RGBA",(ow,oh+offset_y),bg_color)
     background = Image.new("RGBA", base_img.size, (0,0,0,0))
-    background.paste(bg_rect,(overlay_left, ot + offset_y))
+    background.paste(bg_rect,(overlay_left, ot-offset_y))
     img = Image.alpha_composite(base_img, background)
 
     # Resize AFTER background removal
@@ -183,6 +183,7 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
 
     draw = ImageDraw.Draw(img)
 
+    # item size block
     draw_item_size_block(
         draw,
         info.get("size",""),
@@ -191,20 +192,24 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
         blocks_config["Item Size"]["x"],
         blocks_config["Item Size"]["y"],
         blocks_config["Item Size"]["height"],
-        mode_theme
+        offset_y,
+        mode_theme=="Light Mode"
     )
 
-    # Adjust title color for light mode
+    # draw text blocks
     for block, text in all_texts.items():
         cfg = blocks_config[block]
-        if block == "Block 1" and mode_theme == "Light Mode":
-            color = "#15191a"
-        elif block == "Item Price":
-            color = "#99a2a1"
-        else:
-            color = cfg["color"]
-        draw_text_block(draw, text, cfg["x"], cfg["y"], cfg["height"], color, cfg["underline"],
-                        is_currency=True)
+        color = cfg["color_light"] if mode_theme=="Light Mode" else cfg["color_dark"]
+        draw_text_block(
+            draw,
+            text,
+            cfg["x"],
+            cfg["y"]+offset_y,
+            cfg["height"],
+            color,
+            cfg["underline"],
+            is_currency=True
+        )
 
     fw, fh = img.width, int(img.width*16/9)
     if fh>img.height: fh=img.height; fw=int(fh*9/16)
@@ -215,9 +220,6 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme):
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-# ---------------- Theme and Colors ----------------
-mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)  # default = Dark
-
 bg_colors = {
     "Red": "#b04c5c",
     "Green": "#689E9C",
@@ -225,6 +227,8 @@ bg_colors = {
     "Rose": "#FE8AB1",
     "Purple": "#948EF2"
 }
+
+mode_theme = st.radio("Choose Theme", ["Dark Mode","Light Mode"], index=0)
 
 mode = st.radio("Choose Mode", ["Single URL","Bulk URLs"])
 
@@ -252,8 +256,7 @@ if mode == "Single URL":
         with st.spinner("Generating image..."):
             data = st.session_state.cache[url]
             info, product_img = data["info"], data["img"]
-            base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
-            img_cropped = generate_image(info, product_img, bg_color, base_img_path, mode_theme)
+            img_cropped = generate_image(info, product_img, bg_color, mode_theme)
             st.image(img_cropped)
             output_path = os.path.join(script_dir,"output.jpeg")
             img_cropped.convert("RGB").save(output_path)
@@ -284,8 +287,7 @@ elif mode == "Bulk URLs":
                     data = st.session_state.cache[url]
                     info, product_img = data["info"], data["img"]
                     bg_color = random.choice(list(bg_colors.values()))
-                    base_img_path = image_dark if mode_theme=="Dark Mode" else image_light
-                    img_cropped = generate_image(info, product_img, bg_color, base_img_path, mode_theme)
+                    img_cropped = generate_image(info, product_img, bg_color, mode_theme)
 
                     out_path = f"bulk_image_{i}.jpeg"
                     img_cropped.convert("RGB").save(out_path)
