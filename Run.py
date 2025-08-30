@@ -34,19 +34,28 @@ def pad_image(img, padding=50):
 
 def prepare_image_for_removal(img, scale=2, padding=50, color_boost=3.0, contrast_boost=2.0):
     """
-    Pads, upscales, exaggerates colors/contrast, then removes background.
+    Pads, upscales, exaggerates colors/contrast for better mask, 
+    then applies mask to original image to preserve original colors.
     """
     padded = pad_image(img, padding)
     upscaled = upscale_image(padded, scale)
 
-    # Exaggerate colors and contrast for better mask
+    # Exaggerate colors and contrast
     enhancer = ImageEnhance.Color(upscaled)
     boosted = enhancer.enhance(color_boost)
     contrast = ImageEnhance.Contrast(boosted)
     boosted = contrast.enhance(contrast_boost)
 
+    # Background removal
     bg_removed = remove(boosted)
-    return bg_removed
+
+    # Apply mask to original image
+    alpha_mask = bg_removed.split()[-1]  # alpha channel
+    mask_resized = alpha_mask.resize(img.size, Image.Resampling.LANCZOS)
+    result = Image.new("RGBA", img.size)
+    result.paste(img, (0,0), mask_resized)
+
+    return result
 
 # ------------------- VINTED SCRAPER -------------------
 def fetch_vinted(url):
