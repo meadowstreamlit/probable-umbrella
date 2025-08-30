@@ -1,9 +1,10 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont
 import os, re, requests, random, zipfile
 from rembg import remove
 from io import BytesIO
 from bs4 import BeautifulSoup
+import string
 
 # -------------------- SETTINGS --------------------
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -20,6 +21,7 @@ blocks_config = {
 
 # ------------------- UTILS -------------------
 def remove_emojis(text):
+    # Remove any emoji from text
     return text.encode('ascii', 'ignore').decode('ascii')
 
 def upscale_image(img, scale=2):
@@ -32,30 +34,11 @@ def pad_image(img, padding=50):
     new_img.paste(img, (padding, padding))
     return new_img
 
-def prepare_image_for_removal(img, scale=2, padding=50, color_boost=3.0, contrast_boost=2.0):
-    """
-    Pads, upscales, exaggerates colors/contrast for better mask, 
-    then applies mask to original image to preserve original colors.
-    """
+def prepare_image_for_removal(img, scale=2, padding=50):
     padded = pad_image(img, padding)
     upscaled = upscale_image(padded, scale)
-
-    # Exaggerate colors and contrast
-    enhancer = ImageEnhance.Color(upscaled)
-    boosted = enhancer.enhance(color_boost)
-    contrast = ImageEnhance.Contrast(boosted)
-    boosted = contrast.enhance(contrast_boost)
-
-    # Background removal
-    bg_removed = remove(boosted)
-
-    # Apply mask to original image
-    alpha_mask = bg_removed.split()[-1]  # alpha channel
-    mask_resized = alpha_mask.resize(img.size, Image.Resampling.LANCZOS)
-    result = Image.new("RGBA", img.size)
-    result.paste(img, (0,0), mask_resized)
-
-    return result
+    bg_removed = remove(upscaled)
+    return bg_removed
 
 # ------------------- VINTED SCRAPER -------------------
 def fetch_vinted(url):
@@ -114,7 +97,7 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
         font_size += 1
         font = ImageFont.truetype(font_path, font_size)
 
-    # Split title into lines if necessary
+    # Split title into lines if necessary (50 chars, word boundary)
     lines = []
     if len(text) <= 50:
         lines = [text]
@@ -125,11 +108,11 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
         else:
             lines = [text[:last_space], text[last_space+1:]]
 
-    # Smaller font & move down if 2 lines
+    # Adjust font smaller and move down if 2 lines
     if len(lines) > 1:
         font_size -= 3
         font = ImageFont.truetype(font_path, font_size)
-        y += 10
+        y += 10  # move down slightly
 
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h
@@ -158,13 +141,17 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h):
     if size:
         draw.text((cur_x, y_offset), size, fill="#99a2a1", font=font)
         cur_x += draw.textlength(size, font=font) + spacing
+
     draw.text((cur_x, y_offset), "·", fill="#99a2a1", font=font)
     cur_x += draw.textlength("·", font=font) + spacing
+
     if condition:
         draw.text((cur_x, y_offset), condition, fill="#99a2a1", font=font)
         cur_x += draw.textlength(condition, font=font) + spacing
+
     draw.text((cur_x, y_offset), "·", fill="#99a2a1", font=font)
     cur_x += draw.textlength("·", font=font) + spacing
+
     if brand:
         draw.text((cur_x, y_offset), brand, fill="#648a93", font=font)
         bbox = draw.textbbox((cur_x, y_offset), brand, font=font)
@@ -187,6 +174,7 @@ def generate_image(info, product_img, bg_color):
     overlay_left,ot,overlay_right,ob = overlay_box
     ow,oh = overlay_right-overlay_left, ob-ot
 
+    # Background rectangle
     bg_rect = Image.new("RGBA",(ow,oh),bg_color)
     background = Image.new("RGBA", base_img.size, (0,0,0,0))
     background.paste(bg_rect,(overlay_left,ot))
@@ -205,11 +193,21 @@ def generate_image(info, product_img, bg_color):
         img.paste(product_img_resized, (paste_x, paste_y), product_img_resized)
 
     draw = ImageDraw.Draw(img)
-    draw_item_size_block(draw, info.get("size",""), info.get("condition",""), info.get("brand",""),
-                         blocks_config["Item Size"]["x"], blocks_config["Item Size"]["y"], blocks_config["Item Size"]["height"])
+
+    draw_item_size_block(
+        draw,
+        info.get("size",""),
+        info.get("condition",""),
+        info.get("brand",""),
+        blocks_config["Item Size"]["x"],
+        blocks_config["Item Size"]["y"],
+        blocks_config["Item Size"]["height"]
+    )
+
     for block, text in all_texts.items():
         cfg = blocks_config[block]
-        draw_text_block(draw, text, cfg["x"], cfg["y"], cfg["height"], cfg["color"], cfg["underline"], is_currency=True)
+        draw_text_block(draw, text, cfg["x"], cfg["y"], cfg["height"], cfg["color"], cfg["underline"],
+                        is_currency=True)
 
     fw, fh = img.width, int(img.width*16/9)
     if fh>img.height: fh=img.height; fw=int(fh*9/16)
@@ -237,23 +235,23 @@ if mode == "Single URL":
 
     uploaded_file = st.file_uploader("Optional: Use Your Own Image", type=["png","jpg","jpeg"])
     if uploaded_file:
-        with st.spinner("Processing image..."):
+        with st.spinner("Removing background and preparing image..."):
             img_loaded = Image.open(uploaded_file).convert("RGBA")
-            bg_removed = prepare_image_for_removal(img_loaded)
+            bg_removed = prepare_image_for_removal(img_loaded, scale=2, padding=50)
             st.session_state.cache[url] = {"info": None, "img": bg_removed}
 
     if url and url not in st.session_state.cache:
-        with st.spinner("Fetching Vinted info..."):
+        with st.spinner("Fetching Vinted info and image..."):
             info = fetch_vinted(url)
             product_img = None
             if info["image"]:
                 img_data = requests.get(info["image"]).content
                 img_loaded = Image.open(BytesIO(img_data)).convert("RGBA")
-                product_img = prepare_image_for_removal(img_loaded)
+                product_img = prepare_image_for_removal(img_loaded, scale=2, padding=50)
             st.session_state.cache[url] = {"info": info, "img": product_img}
 
     if st.button("Generate Image") and url in st.session_state.cache:
-        with st.spinner("Generating final image..."):
+        with st.spinner("Generating image..."):
             data = st.session_state.cache[url]
             info, product_img = data["info"], data["img"]
             img_cropped = generate_image(info, product_img, bg_color)
@@ -282,7 +280,7 @@ elif mode == "Bulk URLs":
                         if info["image"]:
                             img_data = requests.get(info["image"]).content
                             img_loaded = Image.open(BytesIO(img_data)).convert("RGBA")
-                            product_img = prepare_image_for_removal(img_loaded)
+                            product_img = prepare_image_for_removal(img_loaded, scale=2, padding=50)
                         st.session_state.cache[url] = {"info": info, "img": product_img}
 
                     data = st.session_state.cache[url]
