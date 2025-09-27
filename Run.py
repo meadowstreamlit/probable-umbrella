@@ -48,10 +48,11 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
 
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h + extra_offset
-        if is_currency and line.startswith("£"):
+        if is_currency and (line.startswith("£") or line.startswith("€") or line.startswith("$")):
+            symbol = line[0]
             number_text = line[1:]
-            draw.text((x, y_offset), "£", fill=color, font=font)
-            draw.text((x + draw.textlength("£", font=font), y_offset), number_text, fill=color, font=font)
+            draw.text((x, y_offset), symbol, fill=color, font=font)
+            draw.text((x + draw.textlength(symbol, font=font), y_offset), number_text, fill=color, font=font)
         else:
             draw.text((x, y_offset), line, fill=color, font=font)
 
@@ -100,7 +101,7 @@ def draw_item_size_block(draw, size, condition, brand, x, y, h, mode_theme):
         draw.line((bbox[0], y_line, bbox[2], y_line), fill=brand_color, width=2)
 
 # ------------------- VINTED SCRAPER -------------------
-def fetch_vinted(url):
+def fetch_vinted(url, currency_symbol="£"):
     headers = {"User-Agent":"Mozilla/5.0"}
     r = requests.get(url, headers=headers)
     soup = BeautifulSoup(r.text, "html.parser")
@@ -141,8 +142,8 @@ def fetch_vinted(url):
 
     return {
         "title": title,
-        "price": f"£{price_val:.2f}",
-        "buyer_fee": f"£{buyer_fee:.2f}",
+        "price": f"{currency_symbol}{price_val:.2f}",
+        "buyer_fee": f"{currency_symbol}{buyer_fee:.2f}",
         "image": image,
         "size": size,
         "condition": condition,
@@ -174,7 +175,6 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme, remov
     img = Image.alpha_composite(base_img, background)
 
     if product_img:
-        # Determine effective overlay box
         if mode_theme == "Light Mode":
             effective_box = (overlay_left, (ot + img_offset) - 16, overlay_right, ob + 16)
         else:
@@ -191,7 +191,6 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme, remov
             paste_y = effective_box[1] + (eff_h - new_h)//2
             img.paste(resized, (paste_x, paste_y), resized)
         else:
-            # cover strategy, crop proportionally to fill exact overlay
             pw, ph = product_img.size
             scale = max(eff_w/pw, eff_h/ph)
             new_w, new_h = int(pw*scale), int(ph*scale)
@@ -226,7 +225,6 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme, remov
             color = "#606b6c"
         draw_text_block(draw, text, cfg["x"], cfg["y"] + text_offset, cfg["height"], color, cfg["underline"], is_currency=True)
 
-    # Crop to 16:9
     fw, fh = img.width, int(img.width*16/9)
     if fh>img.height: fh=img.height; fw=int(fh*9/16)
     left, top = (img.width-fw)//2, (img.height-fh)//2
@@ -235,6 +233,9 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme, remov
 
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
+
+# NEW: Currency selector
+currency_symbol = st.radio("Select Currency", ["£", "€", "$"], index=0)
 
 mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)
 bg_colors = {"Red": "#b04c5c","Green": "#689E9C","Blue": "#4E6FA4","Rose": "#FE8AB1","Purple": "#948EF2"}
@@ -249,7 +250,7 @@ if mode == "Single URL":
 
     if url and url not in st.session_state.cache:
         with st.spinner("Fetching Vinted info and image..."):
-            info = fetch_vinted(url)
+            info = fetch_vinted(url, currency_symbol)
             product_img = None
             if info["image"]:
                 img_data = requests.get(info["image"]).content
@@ -278,7 +279,7 @@ elif mode == "Bulk URLs":
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for i, url in enumerate(urls, 1):
                     if url not in st.session_state.cache:
-                        info = fetch_vinted(url)
+                        info = fetch_vinted(url, currency_symbol)
                         product_img = None
                         if info["image"]:
                             img_data = requests.get(info["image"]).content
