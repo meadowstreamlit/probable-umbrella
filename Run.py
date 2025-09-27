@@ -48,11 +48,21 @@ def draw_text_block(draw, text, x, y, h, color, underline=False, is_currency=Fal
 
     for i, line in enumerate(lines):
         y_offset = y - (font.getmetrics()[0]+font.getmetrics()[1])//2 - (len(lines)-1-i)*h + extra_offset
-        if is_currency and (line.startswith("£") or line.startswith("€") or line.startswith("$")):
-            symbol = line[0]
-            number_text = line[1:]
-            draw.text((x, y_offset), symbol, fill=color, font=font)
-            draw.text((x + draw.textlength(symbol, font=font), y_offset), number_text, fill=color, font=font)
+
+        if is_currency:
+            if line.endswith("€"):  # number first, € after
+                number_text = line[:-1]
+                draw.text((x, y_offset), number_text, fill=color, font=font)
+                draw.text((x + draw.textlength(number_text, font=font), y_offset),
+                          "€", fill=color, font=font)
+            elif line.startswith("£") or line.startswith("$"):  # symbol before
+                symbol = line[0]
+                number_text = line[1:]
+                draw.text((x, y_offset), symbol, fill=color, font=font)
+                draw.text((x + draw.textlength(symbol, font=font), y_offset),
+                          number_text, fill=color, font=font)
+            else:
+                draw.text((x, y_offset), line, fill=color, font=font)
         else:
             draw.text((x, y_offset), line, fill=color, font=font)
 
@@ -140,10 +150,18 @@ def fetch_vinted(url, currency_symbol="£"):
     brand_tag = soup.select_one('a[href^="/brand/"] span')
     brand = brand_tag.get_text(strip=True) if brand_tag else ""
 
+    # Format price depending on currency position
+    if currency_symbol == "€":
+        price_str = f"{price_val:.2f}€"
+        fee_str = f"{buyer_fee:.2f}€"
+    else:
+        price_str = f"{currency_symbol}{price_val:.2f}"
+        fee_str = f"{currency_symbol}{buyer_fee:.2f}"
+
     return {
         "title": title,
-        "price": f"{currency_symbol}{price_val:.2f}",
-        "buyer_fee": f"{currency_symbol}{buyer_fee:.2f}",
+        "price": price_str,
+        "buyer_fee": fee_str,
         "image": image,
         "size": size,
         "condition": condition,
@@ -234,9 +252,7 @@ def generate_image(info, product_img, bg_color, base_img_path, mode_theme, remov
 # ------------------- APP -------------------
 st.title("Vinted Link Image Generator")
 
-# NEW: Currency selector
 currency_symbol = st.radio("Select Currency", ["£", "€", "$"], index=0)
-
 mode_theme = st.radio("Select Theme", ["Dark Mode", "Light Mode"], index=0)
 bg_colors = {"Red": "#b04c5c","Green": "#689E9C","Blue": "#4E6FA4","Rose": "#FE8AB1","Purple": "#948EF2"}
 remove_bg = st.toggle("Remove Background", value=True)
